@@ -54,6 +54,7 @@ options {
                 docker {
                   label 'deploy-main'  // both label and image
                   image 'devopseasylearning2021/s1-project02:maven-3.8.4-openjdk-8'
+                  args '-u 0:0'
                 }
               }
             steps {
