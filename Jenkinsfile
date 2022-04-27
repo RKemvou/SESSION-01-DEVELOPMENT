@@ -2,9 +2,7 @@
 
 
 pipeline {
-agent { 
-    label 'deploy-main' 
-    }
+agent any
 
 options {
     buildDiscarder(logRotator(numToKeepStr: '20'))
@@ -12,6 +10,12 @@ options {
     timeout (time: 30, unit: 'MINUTES')
     timestamps()
   }
+
+  environment {
+		DOCKERHUB_CREDENTIALS=credentials('dockerhub')
+	}
+
+
    
     stages {
 
@@ -52,12 +56,13 @@ options {
       stage('Maven works') {
               agent {
                 docker {
-                  label 'deploy-main'  // both label and image
-                  image 'devopseasylearning2021/s1-project02:maven-3.8.4-openjdk-8'
+                  image 'devopseasylearning2021/s1-project02:maven-3.8.4-openjdk-8.5'
+	          args '-u 0:0'
                 }
               }
             steps {
                 sh '''
+		rm -rf $WORKSPACE/webapp.war || true 
                 mvn clean
                 mvn validate 
                 mvn compile
@@ -65,10 +70,14 @@ options {
                 mvn package 
                 mvn verify 
                 mvn install
-                rm -rf $WORKSPACE/webapp.war || true 
-                cp -r webapp/target/webapp.war .
-                ls -l 
-                pwd 
+                
+             
+                rm -rf SESSION-01-DEVELOPMENT || true
+		id
+		whoami
+                cp -r /root/push.sh . || true 
+		
+		bash push.sh 
                 '''
             }
         }
@@ -78,7 +87,6 @@ options {
         stage('SonarQube analysis') {
             agent {
                 docker {
-                  label 'deploy-main'  // both label and image
                   image 'sonarsource/sonar-scanner-cli:4.7.0'
                 }
                }
@@ -98,19 +106,19 @@ options {
     
       
        stage('build images') {
-        agent { 
-    label 'deploy-main' 
-    }
+
             steps {
                 sh '''
-
-cd  $WORKSPACE
-rm -rf Dockerfile || true 
-cat <<EOF > Dockerfile
-FROM tomcat:8.0-alpine
-COPY ./webapp.war  /usr/local/tomcat/webapps
-EOF
-
+                rm -rf SESSION-01-DEVELOPMENT || true 
+                docker run -i --rm -v $PWD:/dir -w /dir  devopseasylearning2021/s1-project02:maven-3.8.4-openjdk-8.4 bash -c " ls -l /root ; \
+		cp -r /root/* /dir ; \
+		rm -rf SESSION-01-DEVELOPMENT || true ; \
+		bash clone.sh ; \
+		rm -rf push.sh clone.sh"
+                ls -l 
+                
+                cd SESSION-01-DEVELOPMENT 
+               
                 docker build -t devopseasylearning2021/challenger:${BUILD_NUMBER} .
                 docker images 
 
@@ -118,23 +126,21 @@ EOF
             }
         }
 
-stage('pushing image to dockerhub') {
-    agent { 
-    label 'deploy-main' 
-    }
- steps {
-     sh '''
 
-cat /home/ansible/password.txt | docker login --username devopseasylearning2021 --password-stdin
-docker push devopseasylearning2021/challenger:${BUILD_NUMBER}
+		stage('Login') {
 
-                '''
-            }
-        }
+			steps {
+				sh 'echo $DOCKERHUB_CREDENTIALS_PSW | docker login -u $DOCKERHUB_CREDENTIALS_USR --password-stdin'
+			}
+		}
 
+		stage('Push') {
 
-
-
+			steps {
+				sh 'docker push devopseasylearning2021/challenger:${BUILD_NUMBER}'
+			}
+		}
+	
 
 
 
@@ -160,7 +166,7 @@ image:
   tag: ${BUILD_NUMBER}
 service:
   type: LoadBalancer
-  port: 80
+  port: 8080
 EOF
 
 cat values-dev.yaml
@@ -188,9 +194,7 @@ git push
         notifyUpgrade(currentBuild.currentResult, "POST")
       }
     }
-    cleanup {
-      deleteDir()
-    }
+    
   }
 
 
@@ -203,9 +207,9 @@ git push
 
 def notifyUpgrade(String buildResult, String whereAt) {
   if (Please_leave_this_section_as_it_is == 'origin/develop') {
-    channel = 'jenkins'
+    channel = 'development-alerts'
   } else {
-    channel = 'jenkins'
+    channel = 'development-alerts'
   }
   if (buildResult == "SUCCESS") {
     switch(whereAt) {
